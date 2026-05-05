@@ -1,0 +1,139 @@
+//@version=5
+indicator("TradingBot Pro — SMC Zones & Signals", overlay=true, max_boxes_count=100, max_lines_count=50)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRADING BOT PRO — SMART MONEY CONCEPT INDICATOR
+//  Paste this in TradingView Pine Editor → Add to Chart
+//  Then set up Alerts with Webhook URL pointing to your server
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── INPUTS ──────────────────────────────────────────────────────────────────
+grp1 = "Zone Settings"
+show_supply    = input.bool(true,   "Show Supply Zones",   group=grp1)
+show_demand    = input.bool(true,   "Show Demand Zones",   group=grp1)
+show_fvg       = input.bool(true,   "Show Fair Value Gaps",group=grp1)
+show_liq       = input.bool(true,   "Show Liquidity Lines",group=grp1)
+show_ob        = input.bool(true,   "Show Order Blocks",   group=grp1)
+extend_bars    = input.int(100,     "Extend Zones (bars)", minval=10, maxval=1000, group=grp1)
+
+grp2 = "Zone Prices — Update from your app"
+supply_top     = input.float(68200, "Supply Top",    group=grp2)
+supply_bot     = input.float(67800, "Supply Bottom", group=grp2)
+demand_top     = input.float(3180,  "Demand Top",    group=grp2)
+demand_bot     = input.float(3120,  "Demand Bottom", group=grp2)
+fvg_top        = input.float(65900, "FVG Top",       group=grp2)
+fvg_bot        = input.float(65400, "FVG Bottom",    group=grp2)
+liq_high       = input.float(69000, "Liquidity High",group=grp2)
+liq_low        = input.float(64500, "Liquidity Low", group=grp2)
+
+grp3 = "Alert Settings"
+webhook_secret = input.string("YOUR_SECRET", "Webhook Secret", group=grp3)
+
+// ─── COLORS ──────────────────────────────────────────────────────────────────
+c_supply  = color.new(color.red,   80)
+c_demand  = color.new(color.green, 80)
+c_fvg     = color.new(color.blue,  80)
+c_ob_sup  = color.new(color.orange,80)
+c_ob_dem  = color.new(color.teal,  80)
+c_liq     = color.new(color.yellow, 0)
+
+// ─── DRAW STATIC ZONES ───────────────────────────────────────────────────────
+var box supply_box = na
+var box demand_box = na
+var box fvg_box    = na
+var line liq_h     = na
+var line liq_l     = na
+
+if barstate.isfirst
+    if show_supply
+        supply_box := box.new(bar_index, supply_top, bar_index+extend_bars, supply_bot,
+            border_color=color.red, bgcolor=c_supply, border_width=1,
+            text="⬇ Supply Zone", text_color=color.red, text_size=size.small, text_halign=text.align_left)
+    if show_demand
+        demand_box := box.new(bar_index, demand_top, bar_index+extend_bars, demand_bot,
+            border_color=color.green, bgcolor=c_demand, border_width=1,
+            text="⬆ Demand Zone", text_color=color.green, text_size=size.small, text_halign=text.align_left)
+    if show_fvg
+        fvg_box := box.new(bar_index, fvg_top, bar_index+extend_bars, fvg_bot,
+            border_color=color.blue, bgcolor=c_fvg, border_width=1,
+            text="FVG", text_color=color.blue, text_size=size.small)
+    if show_liq
+        liq_h := line.new(bar_index, liq_high, bar_index+extend_bars, liq_high,
+            color=c_liq, style=line.style_dashed, width=2)
+        liq_l := line.new(bar_index, liq_low,  bar_index+extend_bars, liq_low,
+            color=c_liq, style=line.style_dashed, width=2)
+
+// ─── DYNAMIC FVG DETECTION ────────────────────────────────────────────────────
+fvg_bull = low > high[2]    // Bullish FVG
+fvg_bear = high < low[2]    // Bearish FVG
+
+if show_fvg and fvg_bull
+    box.new(bar_index[1], low, bar_index+extend_bars, high[2], bgcolor=c_fvg, border_color=color.blue, border_width=1, text="FVG ⬆", text_color=color.blue, text_size=size.tiny)
+if show_fvg and fvg_bear
+    box.new(bar_index[1], high, bar_index+extend_bars, low[2],  bgcolor=c_ob_sup, border_color=color.orange, border_width=1, text="FVG ⬇", text_color=color.orange, text_size=size.tiny)
+
+// ─── ORDER BLOCK DETECTION ───────────────────────────────────────────────────
+// Bullish OB: last bearish candle before a big bullish move
+bull_move = close > close[1] * 1.005
+bear_move = close < close[1] * 0.995
+
+ob_demand = show_ob and close[1] < open[1] and bull_move
+ob_supply = show_ob and close[1] > open[1] and bear_move
+
+if ob_demand
+    box.new(bar_index[1], high[1], bar_index+30, low[1], bgcolor=c_ob_dem, border_color=color.teal, border_width=1, text="OB ⬆", text_color=color.teal, text_size=size.tiny)
+if ob_supply
+    box.new(bar_index[1], high[1], bar_index+30, low[1], bgcolor=c_ob_sup, border_color=color.orange, border_width=1, text="OB ⬇", text_color=color.orange, text_size=size.tiny)
+
+// ─── BOS / CHOCH DETECTION ───────────────────────────────────────────────────
+swing_high_len = 5
+swing_low_len  = 5
+
+ph = ta.pivothigh(high, swing_high_len, swing_high_len)
+pl = ta.pivotlow( low,  swing_low_len,  swing_low_len)
+
+var float last_ph = na
+var float last_pl = na
+if not na(ph) then last_ph := ph
+if not na(pl) then last_pl := pl
+
+bos_bull = not na(last_ph) and close > last_ph
+bos_bear = not na(last_pl) and close < last_pl
+
+if bos_bull
+    label.new(bar_index, low,  "BOS ⬆", style=label.style_label_up,   color=color.new(color.green,70), textcolor=color.green, size=size.tiny)
+if bos_bear
+    label.new(bar_index, high, "BOS ⬇", style=label.style_label_down, color=color.new(color.red,70),   textcolor=color.red,   size=size.tiny)
+
+// ─── LIQUIDITY SWEEP DETECTION ───────────────────────────────────────────────
+swept_high = not na(last_ph) and high > last_ph and close < last_ph
+swept_low  = not na(last_pl) and low  < last_pl and close > last_pl
+
+if swept_high
+    label.new(bar_index, high, "💧 Liq Sweep ⬇", style=label.style_label_down, color=color.new(color.red,60), textcolor=color.red, size=size.tiny)
+if swept_low
+    label.new(bar_index, low,  "💧 Liq Sweep ⬆", style=label.style_label_up,   color=color.new(color.green,60), textcolor=color.green, size=size.tiny)
+
+// ─── ZONE ENTRY SIGNALS ──────────────────────────────────────────────────────
+in_supply = close >= supply_bot and close <= supply_top
+in_demand = close >= demand_bot and close <= demand_top
+in_fvg    = close >= fvg_bot    and close <= fvg_top
+near_liq_h = math.abs(close - liq_high) / liq_high < 0.003
+near_liq_l = math.abs(close - liq_low)  / liq_low  < 0.003
+
+plotshape(in_supply, "In Supply Zone", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.small)
+plotshape(in_demand, "In Demand Zone", style=shape.triangleup,   location=location.belowbar, color=color.green, size=size.small)
+
+// ─── ALERT CONDITIONS ────────────────────────────────────────────────────────
+alertcondition(in_supply,   "SUPPLY ZONE HIT",   "SUPPLY ZONE HIT — Consider SHORT — Pair: {{ticker}} Price: {{close}}")
+alertcondition(in_demand,   "DEMAND ZONE HIT",   "DEMAND ZONE HIT — Consider LONG  — Pair: {{ticker}} Price: {{close}}")
+alertcondition(in_fvg,      "FVG HIT",           "FVG HIT — Watch Reaction — Pair: {{ticker}} Price: {{close}}")
+alertcondition(swept_high,  "LIQUIDITY SWEEP ⬇", "Liq Sweep HIGH — Bearish expected — Pair: {{ticker}} Price: {{close}}")
+alertcondition(swept_low,   "LIQUIDITY SWEEP ⬆", "Liq Sweep LOW  — Bullish expected — Pair: {{ticker}} Price: {{close}}")
+alertcondition(bos_bull,    "BOS BULLISH",        "Break of Structure BULLISH — Pair: {{ticker}} Price: {{close}}")
+alertcondition(bos_bear,    "BOS BEARISH",        "Break of Structure BEARISH — Pair: {{ticker}} Price: {{close}}")
+
+// ─── WEBHOOK BODY (paste in TradingView Alert → Message box) ─────────────────
+// {"secret":"YOUR_SECRET","pair":"{{ticker}}","type":"{{plot_0}}","price":"{{close}}","direction":"Short"}
+//
+// WEBHOOK URL: http://YOUR_SERVER_IP:5000/api/webhook/tradingview

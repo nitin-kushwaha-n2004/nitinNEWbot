@@ -1,0 +1,14 @@
+# Trading
+ccxt==4.2.25
+requests==2.31.0
+
+# Telegram
+python-telegram-bot==20.7
+
+# Data
+pandas==2.1.4
+numpy==1.26.3
+
+# Utilities
+python-dotenv==1.0.0
+aiohttp==3.9.1
